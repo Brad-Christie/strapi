@@ -75,14 +75,18 @@ module.exports = strapi => {
           await next();
         } catch (error) {
           // emit error if configured
-          if (_.get(strapi, 'config.currentEnvironment.server.emitErrors', false)) {
+          if (strapi.config.get('server.emitErrors', false)) {
             strapi.app.emit('error', error, ctx);
           }
 
           // Log error.
-          strapi.log.error(error);
 
           const { status, body } = formatBoomPayload(error);
+
+          if (status >= 500) {
+            strapi.log.error(error);
+          }
+
           ctx.body = body;
           ctx.status = status;
         }
@@ -101,13 +105,13 @@ module.exports = strapi => {
     // Custom function to avoid ctx.body repeat
     createResponses() {
       boomMethods.forEach(method => {
-        strapi.app.response[method] = function(...rest) {
-          const boomError = Boom[method](...rest) || {};
+        strapi.app.response[method] = function(msg, ...rest) {
+          const boomError = Boom[method](msg, ...rest) || {};
 
           const { status, body } = formatBoomPayload(boomError);
 
           // keep retro-compatibility for old error formats
-          body.message = body.data;
+          body.message = msg || body.data || body.message;
 
           this.body = body;
           this.status = status;

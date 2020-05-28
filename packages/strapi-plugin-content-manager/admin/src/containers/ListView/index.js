@@ -2,25 +2,25 @@ import React, { memo, useCallback, useEffect, useRef, useState } from 'react';
 import PropTypes from 'prop-types';
 import { connect } from 'react-redux';
 import { bindActionCreators, compose } from 'redux';
-import { capitalize, get, sortBy } from 'lodash';
+import { get, sortBy } from 'lodash';
 import { FormattedMessage } from 'react-intl';
 import { Header } from '@buffetjs/custom';
 import {
   PopUpWarning,
+  generateFiltersFromSearch,
+  generateSearchFromFilters,
+  generateSearchFromObject,
   getQueryParameters,
   useGlobalContext,
   request,
 } from 'strapi-helper-plugin';
+
 import pluginId from '../../pluginId';
 import DisplayedFieldsDropdown from '../../components/DisplayedFieldsDropdown';
 import Container from '../../components/Container';
 import CustomTable from '../../components/CustomTable';
 import FilterPicker from '../../components/FilterPicker';
 import Search from '../../components/Search';
-import {
-  generateFiltersFromSearch,
-  generateSearchFromFilters,
-} from '../../utils/search';
 import ListViewProvider from '../ListViewProvider';
 import { onChangeListLabels, resetListLabels } from '../Main/actions';
 import { AddFilterCta, FilterIcon, Wrapper } from './components';
@@ -36,10 +36,9 @@ import {
   toggleModalDelete,
   toggleModalDeleteAll,
 } from './actions';
-import reducer from './reducer';
+
 import makeSelectListView from './selectors';
 import getRequestUrl from '../../utils/getRequestUrl';
-import generateSearchFromObject from './utils/generateSearchFromObject';
 
 /* eslint-disable react/no-array-index-key */
 
@@ -48,6 +47,7 @@ function ListView({
   data,
   emitEvent,
   entriesToDelete,
+  isLoading,
   location: { pathname, search },
   getDataSucceeded,
   layouts,
@@ -66,8 +66,6 @@ function ListView({
   showWarningDeleteAll,
   toggleModalDeleteAll,
 }) {
-  strapi.useInjectReducer({ key: 'listView', reducer, pluginId });
-
   const { formatMessage } = useGlobalContext();
   const getLayoutSettingRef = useRef();
   const getDataRef = useRef();
@@ -100,16 +98,14 @@ function ListView({
   const getSearchParams = useCallback(
     (updatedParams = {}) => {
       return {
-        _limit:
-          getQueryParameters(search, '_limit') ||
-          getLayoutSettingRef.current('pageSize'),
+        _limit: getQueryParameters(search, '_limit') || getLayoutSettingRef.current('pageSize'),
         _page: getQueryParameters(search, '_page') || 1,
         _q: getQueryParameters(search, '_q') || '',
         _sort:
           getQueryParameters(search, '_sort') ||
-          `${getLayoutSettingRef.current(
-            'defaultSortBy'
-          )}:${getLayoutSettingRef.current('defaultSortOrder')}`,
+          `${getLayoutSettingRef.current('defaultSortBy')}:${getLayoutSettingRef.current(
+            'defaultSortOrder'
+          )}`,
         filters: generateFiltersFromSearch(search),
         ...updatedParams,
       };
@@ -176,11 +172,9 @@ function ListView({
   };
 
   // Helpers
-  const getMetaDatas = (path = []) =>
-    get(layouts, [...contentTypePath, 'metadatas', ...path], {});
+  const getMetaDatas = (path = []) => get(layouts, [...contentTypePath, 'metadatas', ...path], {});
 
-  const getListLayout = () =>
-    get(layouts, [...contentTypePath, 'layouts', 'list'], []);
+  const getListLayout = () => get(layouts, [...contentTypePath, 'layouts', 'list'], []);
 
   const getListSchema = () => get(layouts, [...contentTypePath, 'schema'], {});
 
@@ -193,13 +187,9 @@ function ListView({
       Object.keys(getMetaDatas())
         .filter(
           key =>
-            ![
-              'json',
-              'component',
-              'dynamiczone',
-              'relation',
-              'richtext',
-            ].includes(get(getListSchema(), ['attributes', key, 'type'], ''))
+            !['json', 'component', 'dynamiczone', 'relation', 'richtext'].includes(
+              get(getListSchema(), ['attributes', key, 'type'], '')
+            )
         )
         .map(label => ({
           name: label,
@@ -227,9 +217,7 @@ function ListView({
     const currentSort = getSearchParams()._sort;
 
     if (value && getListLayout().length === 1) {
-      strapi.notification.error(
-        'content-manager.notification.error.displayedFields'
-      );
+      strapi.notification.error('content-manager.notification.error.displayedFields');
 
       return;
     }
@@ -298,7 +286,7 @@ function ListView({
           id: 'content-manager.containers.List.addAnEntry',
         },
         {
-          entity: capitalize(getName()) || 'Content Manager',
+          entity: getName() || 'Content Manager',
         }
       ),
       onClick: () => {
@@ -361,7 +349,7 @@ function ListView({
           onSubmit={handleSubmit}
         />
         <Container className="container-fluid">
-          {!isFilterPickerOpen && <Header {...headerProps} />}
+          {!isFilterPickerOpen && <Header {...headerProps} isLoading={isLoading} />}
           {getLayoutSettingRef.current('searchable') && (
             <Search
               changeParams={handleChangeParams}
@@ -376,14 +364,9 @@ function ListView({
                 <div className="row" style={{ marginLeft: 0, marginRight: 0 }}>
                   {getLayoutSettingRef.current('filterable') && (
                     <>
-                      <AddFilterCta
-                        type="button"
-                        onClick={toggleFilterPickerState}
-                      >
+                      <AddFilterCta type="button" onClick={toggleFilterPickerState}>
                         <FilterIcon />
-                        <FormattedMessage
-                          id={`${pluginId}.components.AddFilterCTA.add`}
-                        />
+                        <FormattedMessage id="app.utils.filters" />
                       </AddFilterCta>
                       {getSearchParams().filters.map((filter, key) => (
                         <Filter
@@ -421,6 +404,7 @@ function ListView({
                   headers={getTableHeaders()}
                   isBulkable={getLayoutSettingRef.current('bulkable')}
                   onChangeParams={handleChangeParams}
+                  showLoader={isLoading}
                 />
                 <Footer />
               </div>
@@ -466,6 +450,7 @@ ListView.propTypes = {
   data: PropTypes.array.isRequired,
   emitEvent: PropTypes.func.isRequired,
   entriesToDelete: PropTypes.array.isRequired,
+  isLoading: PropTypes.bool.isRequired,
   layouts: PropTypes.object,
   location: PropTypes.shape({
     pathname: PropTypes.string.isRequired,

@@ -145,9 +145,7 @@ module.exports = {
     }
 
     // First, check if their is at least one admin
-    const admins = await strapi
-      .query('administrator', 'admin')
-      .find({ _limit: 1 });
+    const admins = await strapi.query('administrator', 'admin').find({ _limit: 1 });
 
     if (admins.length > 0) {
       return ctx.badRequest(
@@ -159,9 +157,7 @@ module.exports = {
       );
     }
 
-    params.password = await strapi.admin.services.auth.hashPassword(
-      params.password
-    );
+    params.password = await strapi.admin.services.auth.hashPassword(params.password);
 
     const admin = await strapi.query('administrator', 'admin').findOne({
       email: params.email,
@@ -184,7 +180,7 @@ module.exports = {
 
       const jwt = strapi.admin.services.auth.createJwtToken(admin);
 
-      strapi.emit('didCreateFirstAdmin');
+      await strapi.telemetry.send('didCreateFirstAdmin');
 
       ctx.send({
         jwt,
@@ -203,7 +199,7 @@ module.exports = {
     }
   },
 
-  async changePassword(ctx) {
+  async resetPassword(ctx) {
     const { password, passwordConfirmation, code } = {
       ...ctx.request.body,
       ...ctx.params,
@@ -300,9 +296,7 @@ module.exports = {
     }
 
     // Find the admin thanks to his email.
-    const admin = await strapi
-      .query('administrator', 'admin')
-      .findOne({ email });
+    const admin = await strapi.query('administrator', 'admin').findOne({ email });
 
     // admin not found.
     if (!admin) {
@@ -322,11 +316,6 @@ module.exports = {
     const resetPasswordToken = crypto.randomBytes(64).toString('hex');
 
     const settings = {
-      from: {
-        name: 'Administration Panel',
-        email: 'no-reply@strapi.io',
-      },
-      response_email: '',
       object: 'Reset password',
       message: `<p>We heard that you lost your password. Sorry about that!</p>
 
@@ -341,12 +330,7 @@ module.exports = {
       // Send an email to the admin.
       await strapi.plugins['email'].services.email.send({
         to: admin.email,
-        from:
-          settings.from.email || settings.from.name
-            ? `${settings.from.name} <${settings.from.email}>`
-            : undefined,
-        replyTo: settings.response_email,
-        subject: settings.object,
+        subject: 'Reset password',
         text: settings.message,
         html: settings.message,
       });
@@ -355,9 +339,7 @@ module.exports = {
     }
 
     // Update the admin.
-    await strapi
-      .query('administrator', 'admin')
-      .update({ id: admin.id }, { resetPasswordToken });
+    await strapi.query('administrator', 'admin').update({ id: admin.id }, { resetPasswordToken });
 
     ctx.send({ ok: true });
   },

@@ -7,8 +7,15 @@
 const _ = require('lodash');
 const compose = require('koa-compose');
 
-const { convertToParams, convertToQuery, amountLimiting } = require('./utils');
 const { policy: policyUtils } = require('strapi-utils');
+const {
+  convertToParams,
+  convertToQuery,
+  amountLimiting,
+  getAction,
+  getActionDetails,
+  isResolvablePath,
+} = require('./utils');
 
 const buildMutation = (mutationName, config) => {
   const { resolver, resolverOf, transformOutput = _.identity } = config;
@@ -27,6 +34,8 @@ const buildMutation = (mutationName, config) => {
       const ctx = buildMutationContext({ options, graphqlContext });
 
       await policiesMiddleware(ctx);
+      graphqlContext.context = ctx;
+
       return resolver(root, options, graphqlContext);
     };
   }
@@ -52,10 +61,7 @@ const buildMutation = (mutationName, config) => {
 const buildMutationContext = ({ options, graphqlContext }) => {
   const { context } = graphqlContext;
 
-  const ctx = context.app.createContext(
-    _.clone(context.req),
-    _.clone(context.res)
-  );
+  const ctx = context.app.createContext(_.clone(context.req), _.clone(context.res));
 
   if (options.input && options.input.where) {
     ctx.params = convertToParams(options.input.where || {});
@@ -89,6 +95,8 @@ const buildQuery = (queryName, config) => {
       const { ctx, opts } = buildQueryContext({ options, graphqlContext });
 
       await policiesMiddleware(ctx);
+      graphqlContext.context = ctx;
+
       return resolver(root, opts, graphqlContext);
     };
   }
@@ -119,10 +127,7 @@ const validateResolverOption = config => {
     throw new Error(`Missing "resolverOf" option with custom resolver.`);
   }
 
-  if (
-    !_.isUndefined(policies) &&
-    (!Array.isArray(policies) || !_.every(policies, _.isString))
-  ) {
+  if (!_.isUndefined(policies) && (!Array.isArray(policies) || !_.every(policies, _.isString))) {
     throw new Error('Policies option must be an array of string.');
   }
 
@@ -133,10 +138,7 @@ const buildQueryContext = ({ options, graphqlContext }) => {
   const { context } = graphqlContext;
   const _options = _.cloneDeep(options);
 
-  const ctx = context.app.createContext(
-    _.clone(context.req),
-    _.clone(context.res)
-  );
+  const ctx = context.app.createContext(_.clone(context.req), _.clone(context.res));
 
   // Note: we've to used the Object.defineProperties to reset the prototype. It seems that the cloning the context
   // cause a lost of the Object prototype.
@@ -152,80 +154,9 @@ const buildQueryContext = ({ options, graphqlContext }) => {
   return { ctx, opts };
 };
 
-const getAction = resolver => {
-  if (!_.isString(resolver)) {
-    throw new Error(`Error building query. Expected a string, got ${resolver}`);
-  }
-
-  const actionDetails = getActionDetails(resolver);
-  const actionFn = getActionFn(actionDetails);
-
-  if (!actionFn) {
-    throw new Error(
-      `[GraphQL] Cannot find action "${resolver}". Check your graphql configurations.`
-    );
-  }
-
-  return actionFn;
-};
-
-const getActionFn = details => {
-  const { controller, action, plugin, api } = details;
-
-  if (plugin) {
-    return _.get(strapi.plugins, [
-      _.toLower(plugin),
-      'controllers',
-      _.toLower(controller),
-      action,
-    ]);
-  }
-
-  return _.get(strapi.api, [
-    _.toLower(api),
-    'controllers',
-    _.toLower(controller),
-    action,
-  ]);
-};
-
-const getActionDetails = resolver => {
-  if (resolver.startsWith('plugins::')) {
-    const [, path] = resolver.split('::');
-    const [plugin, controller, action] = path.split('.');
-
-    return { plugin, controller, action };
-  }
-
-  if (resolver.startsWith('application::')) {
-    const [, path] = resolver.split('::');
-    const [api, controller, action] = path.split('.');
-
-    return { api, controller, action };
-  }
-
-  const args = resolver.split('.');
-
-  if (args.length === 3) {
-    const [api, controller, action] = args;
-    return { api, controller, action };
-  }
-
-  // if direct api access
-  if (args.length === 2) {
-    const [controller, action] = args;
-    return { api: controller, controller, action };
-  }
-
-  throw new Error(
-    `[GraphQL] Could not find action for resolver "${resolver}". Check your graphql configurations.`
-  );
-};
-
 /**
  * Checks if a resolverPath (resolver or resovlerOf) might be resolved
  */
-const isResolvablePath = path => _.isString(path) && !_.isEmpty(path);
 
 const getPolicies = config => {
   const { resolver, policies = [], resolverOf } = config;
@@ -234,9 +165,7 @@ const getPolicies = config => {
 
   const policyFns = [];
 
-  const { controller, action, plugin: pathPlugin } = isResolvablePath(
-    resolverOf
-  )
+  const { controller, action, plugin: pathPlugin } = isResolvablePath(resolverOf)
     ? getActionDetails(resolverOf)
     : getActionDetails(resolver);
 

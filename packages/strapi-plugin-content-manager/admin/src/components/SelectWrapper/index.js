@@ -1,9 +1,9 @@
 /* eslint-disable react-hooks/exhaustive-deps */
-import React, { useState, useEffect, useRef, memo } from 'react';
+import React, { useState, useEffect, useMemo, useRef, memo } from 'react';
 import PropTypes from 'prop-types';
 import { FormattedMessage } from 'react-intl';
 import { Link, useLocation } from 'react-router-dom';
-import { cloneDeep, get, isArray, isEmpty } from 'lodash';
+import { cloneDeep, findIndex, get, isArray, isEmpty } from 'lodash';
 import { request } from 'strapi-helper-plugin';
 import pluginId from '../../pluginId';
 import useDataManager from '../../hooks/useDataManager';
@@ -31,7 +31,7 @@ function SelectWrapper({
 
   const value = get(modifiedData, name, null);
   const [state, setState] = useState({
-    _q: '',
+    _contains: '',
     _limit: 20,
     _start: 0,
   });
@@ -41,6 +41,22 @@ function SelectWrapper({
   const { signal } = abortController;
   const ref = useRef();
   const startRef = useRef();
+
+  const filteredOptions = useMemo(() => {
+    return options.filter(option => {
+      if (!isEmpty(value)) {
+        // SelectMany
+        if (Array.isArray(value)) {
+          return findIndex(value, o => o.id === option.value.id) === -1;
+        }
+
+        // SelectOne
+        return get(value, 'id', '') !== option.value.id;
+      }
+
+      return true;
+    });
+  }, [options, value]);
 
   startRef.current = state._start;
 
@@ -53,15 +69,13 @@ function SelectWrapper({
 
     if (!isDraggingComponent) {
       try {
-        const params = cloneDeep(state);
         const requestUrl = `/${pluginId}/explorer/${targetModel}`;
 
-        if (isEmpty(params._q)) {
-          delete params._q;
-        } else {
-          delete params._limit;
-          delete params._start;
-        }
+        const containsKey = `${mainField}_contains`;
+        const { _contains, ...restState } = cloneDeep(state);
+        const params = isEmpty(state._contains)
+          ? restState
+          : { [containsKey]: _contains, ...restState };
 
         const data = await request(requestUrl, {
           method: 'GET',
@@ -72,13 +86,6 @@ function SelectWrapper({
         const formattedData = data.map(obj => {
           return { value: obj, label: obj[mainField] };
         });
-
-        if (!isEmpty(params._q)) {
-          setOptions(formattedData);
-          setState(prev => ({ ...prev, _start: 0 }));
-
-          return;
-        }
 
         setOptions(prevState =>
           prevState.concat(formattedData).filter((obj, index) => {
@@ -101,7 +108,7 @@ function SelectWrapper({
   };
 
   useEffect(() => {
-    if (state._q !== '') {
+    if (state._contains !== '') {
       let timer = setTimeout(() => {
         ref.current();
       }, 300);
@@ -114,7 +121,7 @@ function SelectWrapper({
     return () => {
       abortController.abort();
     };
-  }, [state._q]);
+  }, [state._contains]);
 
   useEffect(() => {
     if (state._start !== 0) {
@@ -129,11 +136,11 @@ function SelectWrapper({
   const onInputChange = (inputValue, { action }) => {
     if (action === 'input-change') {
       setState(prevState => {
-        if (prevState._q === inputValue) {
+        if (prevState._contains === inputValue) {
           return prevState;
         }
 
-        return { ...prevState, _q: inputValue };
+        return { ...prevState, _contains: inputValue, _start: 0 };
       });
     }
 
@@ -164,6 +171,18 @@ function SelectWrapper({
   const Component = isSingle ? SelectOne : SelectMany;
   const associationsLength = isArray(value) ? value.length : 0;
 
+  const customStyles = {
+    option: provided => {
+      return {
+        ...provided,
+        maxWidth: '100% !important',
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
+      };
+    },
+  };
+
   return (
     <Wrapper className="form-group">
       <Nav>
@@ -190,13 +209,13 @@ function SelectWrapper({
         move={moveRelation}
         name={name}
         nextSearch={nextSearch}
-        options={options}
+        options={filteredOptions}
         onChange={value => {
           onChange({ target: { name, value: value ? value.value : value } });
         }}
         onInputChange={onInputChange}
         onMenuClose={() => {
-          setState(prevState => ({ ...prevState, _q: '', _start: 0 }));
+          setState(prevState => ({ ...prevState, _contains: '' }));
         }}
         onMenuScrollToBottom={onMenuScrollToBottom}
         onRemove={onRemoveRelation}
@@ -207,6 +226,7 @@ function SelectWrapper({
             placeholder
           )
         }
+        styles={customStyles}
         targetModel={targetModel}
         value={value}
       />
